@@ -12,39 +12,46 @@ const db = admin.firestore();
 const mqtt = require('mqtt');
 
 function connectAndSubscribe() {
-  // Fetch broker configurations from Firebase
-  admin.firestore().collection('mqttBrokers').get().then(snapshot => {
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const client = mqtt.connect(`mqtt://${data.host}:${data.port}`, {
-        username: data.username,
-        password: data.password
-      });
-
-      client.on('connect', () => {
-        console.log(`Connected to MQTT Broker: ${data.host}`);
-        client.subscribe(data.topic, (err) => {
-          if (!err) {
-            console.log(`Subscribed to topic: ${data.topic}`);
-          } else {
-            console.error(`Could not subscribe to topic: ${data.topic}`, err);
+    admin.firestore().collection('mqttBrokers').get().then(snapshot => {
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const client = mqtt.connect(`mqtt://${data.host}:${data.port}`, {
+          username: data.username,
+          password: data.password
+        });
+  
+        client.on('connect', () => {
+          console.log(`Connected to MQTT Broker: ${data.host}`);
+          client.subscribe(data.topic, (err) => {
+            if (!err) {
+              console.log(`Subscribed to topic: ${data.topic}`);
+            } else {
+              console.error(`Could not subscribe to topic: ${data.topic}`, err);
+            }
+          });
+        });
+  
+        client.on('message', (topic, message) => {
+          try {
+            // Parse the incoming message as JSON
+            const msg = JSON.parse(message.toString());
+  
+            // Access the TA_AVG value
+            const taAvg = msg.data[0].vals[6]; // Index 6 for TA_AVG
+            console.log(`Temperature Average (TA_AVG) received: ${taAvg}`);
+          } catch(e) {
+            console.error('Error parsing message or extracting TA_AVG:', e);
           }
         });
+  
+        client.on('error', (err) => {
+          console.error('Connection error: ', err);
+          client.end();
+        });
       });
-
-      client.on('message', (topic, message) => {
-        // Log the message received
-        console.log(`Message received on ${topic}: ${message.toString()}`);
-      });
-
-      client.on('error', (err) => {
-        console.error('Connection error: ', err);
-        client.end();
-      });
+    }).catch(error => {
+      console.error("Error fetching broker configurations: ", error);
     });
-  }).catch(error => {
-    console.error("Error fetching broker configurations: ", error);
-  });
-}
-
-connectAndSubscribe();
+  }
+  
+  connectAndSubscribe();
