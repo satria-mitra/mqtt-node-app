@@ -37,34 +37,40 @@ function connectAndSubscribe() {
                 try {
                     // Parse the incoming message as JSON
                     const msg = JSON.parse(message.toString());
-
+            
                     // Access the values
                     const deviceId = msg.data[0].vals[0];  // "Device ID"
-                    const date = msg.data[0].vals[1];      // "Date"
-                    const time = msg.data[0].vals[2];      // "Time"
-                    const taAvg = msg.data[0].vals[6];     // "Temperature Average" index 6 for TA_AVG
-
+                    const date = msg.data[0].vals[1];      // "Date" formatted as YYYY-MM-DD
+                    const time = msg.data[0].vals[2];      // "Time" formatted as HH:mm
+                    const taAvg = msg.data[0].vals[6];     // "Temperature Average"
+            
                     // Log the values
                     console.log(`Received: Device ID - ${deviceId}, Date - ${date}, Time - ${time}, TA_AVG - ${taAvg}`);
-
-                    // Store the data in Firebase Realtime Database
-                    const dbRef = admin.database().ref('mqttData');
-                    dbRef.push({
-                        deviceId: deviceId,
-                        date: date,
-                        time: time,
-                        temperatureAverage: taAvg,
-                        receivedAt: admin.database.ServerValue.TIMESTAMP  // Adds the current server timestamp
-                    }).then(() => {
-                        console.log('Data stored successfully in Realtime Database');
-                    }).catch(error => {
-                        console.error('Failed to store data in Realtime Database:', error);
+            
+                    // Define the database reference path
+                    const dbRef = admin.database().ref(`devices/${deviceId}/${date.replace(/-/g, '/')}/${time.replace(':', '-')}`);
+            
+                    // Check if data already exists at this location
+                    dbRef.once('value', snapshot => {
+                        if (!snapshot.exists()) {
+                            // Store the data if it does not exist
+                            dbRef.set({
+                                temp: taAvg,
+                            }).then(() => {
+                                console.log('Data stored successfully in Realtime Database');
+                            }).catch(error => {
+                                console.error('Failed to store data in Realtime Database:', error);
+                            });
+                        } else {
+                            console.log('Data already exists for this timestamp, skipping duplicate.');
+                        }
                     });
-
+            
                 } catch(e) {
                     console.error('Error parsing message or extracting values:', e);
                 }
             });
+            
 
             client.on('error', (err) => {
                 console.error('Connection error: ', err);
