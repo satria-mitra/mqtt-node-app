@@ -10,7 +10,7 @@ if (!admin.apps.length) {
 }
 
 exports.mqttListener = functions.pubsub.schedule('every 1 minutes').onRun((context) => {
-    connectAndSubscribe();
+    connectAndSubscribe();  // Your existing function to connect and subscribe to MQTT
 });
 
 function connectAndSubscribe() {
@@ -47,17 +47,18 @@ function connectAndSubscribe() {
                     // Log the values
                     console.log(`Received: Device ID - ${deviceId}, Date - ${date}, Time - ${time}, TA_AVG - ${taAvg}`);
 
-                    // Store the data in Firestore
-                    admin.firestore().collection('mqttData').add({
+                    // Store the data in Firebase Realtime Database
+                    const dbRef = admin.database().ref('mqttData');
+                    dbRef.push({
                         deviceId: deviceId,
                         date: date,
                         time: time,
                         temperatureAverage: taAvg,
-                        receivedAt: admin.firestore.FieldValue.serverTimestamp()  // Adds the current server timestamp
+                        receivedAt: admin.database.ServerValue.TIMESTAMP  // Adds the current server timestamp
                     }).then(() => {
-                        console.log('Data stored successfully in Firestore');
+                        console.log('Data stored successfully in Realtime Database');
                     }).catch(error => {
-                        console.error('Failed to store data in Firestore:', error);
+                        console.error('Failed to store data in Realtime Database:', error);
                     });
 
                 } catch(e) {
@@ -69,7 +70,6 @@ function connectAndSubscribe() {
                 console.error('Connection error: ', err);
                 client.end();
             });
-
         });
     }).catch(error => {
         console.error("Error fetching broker configurations: ", error);
