@@ -4,62 +4,31 @@ const mqtt = require('mqtt');
 admin.initializeApp();
 
 let mqttClient = null;
+let subscribedTopics = new Set();  // Keep track of subscribed topics to avoid duplicates
 
 async function setupMqttClient() {
-    const mqttBrokersSnapshot = await admin.firestore().collection('mqttBrokers').get();
-    if (mqttBrokersSnapshot.empty) {
-        console.log('No MQTT configuration found.');
+    const brokerConfigSnapshot = await admin.firestore().collection('brokers').get();
+    if (brokerConfigSnapshot.empty) {
+        console.log('No broker configuration found.');
         return;
     }
 
-    const mqttConfig = mqttBrokersSnapshot.docs[0].data();
-    console.log(`Attempting to connect to MQTT Broker: ${mqttConfig.host} with topic ${mqttConfig.topic}`);
-    
-    mqttClient = mqtt.connect(`mqtt://${mqttConfig.host}:${mqttConfig.port}`, {
-        username: mqttConfig.username,
-        password: mqttConfig.password
+    const brokerConfig = brokerConfigSnapshot.docs[0].data();
+    console.log(`Attempting to connect to MQTT Broker: ${brokerConfig.host}`);
+
+    mqttClient = mqtt.connect(`mqtt://${brokerConfig.host}:${brokerConfig.port}`, {
+        username: brokerConfig.username,
+        password: brokerConfig.password
     });
 
     mqttClient.on('connect', () => {
-        console.log(`Connected to MQTT Broker: ${mqttConfig.host}`);
-        mqttClient.subscribe(mqttConfig.topic, (err) => {
-            if (!err) {
-                console.log(`Subscribed to topic: ${mqttConfig.topic}`);
-            } else {
-                console.error(`Subscription error: ${err}`);
-            }
-        });
+        console.log(`Connected to MQTT Broker: ${brokerConfig.host}`);
+        refreshSubscriptions();  // Refresh and subscribe to topics on connect
     });
 
     mqttClient.on('message', (topic, message) => {
-        try {
-            const msg = JSON.parse(message.toString());
-    
-            const deviceId = msg.data[0].vals[0];  // "Device ID"
-            const date = msg.data[0].vals[1].replace(/\//g, '-');  // "Date" formatted as YYYY-MM-DD
-            const time = msg.data[0].vals[2].replace(/:/g, '-');   // "Time" formatted as HH-mm
-            const taAvg = msg.data[0].vals[6];     // Temperature Average
-            const rhAvg = msg.data[0].vals[9];     // Relative Humidity Average
-    
-            // Log the values to be stored
-            console.log(`Storing data: Device ID - ${deviceId}, Date - ${date}, Time - ${time}, TA_AVG - ${taAvg}, RH_AVG - ${rhAvg}`);
-    
-            // Reference to the specific location in the Firebase Realtime Database
-            const ref = admin.database().ref(`devices/${deviceId}/${date}/${time}`);
-            ref.set({
-                temp_avg: taAvg,
-                rh_avg: rhAvg
-            }).then(() => {
-                console.log('Data stored successfully in Firebase RTDB');
-            }).catch((error) => {
-                console.error('Failed to store data in Firebase RTDB:', error);
-            });
-    
-        } catch (e) {
-            console.error('Error parsing message or extracting values:', e);
-        }
+        processMessage(topic, message);
     });
-    
 
     mqttClient.on('error', (err) => {
         console.error('MQTT Connection error:', err);
@@ -71,11 +40,54 @@ async function setupMqttClient() {
     });
 }
 
-exports.mqttListener = functions.pubsub.schedule('every 1 minutes').onRun((context) => {
+async function refreshSubscriptions() {
+    const devicesSnapshot = await admin.firestore().collection('devices').get();
+    devicesSnapshot.docs.forEach(doc => {
+        const deviceConfig = doc.data();
+        const topic = deviceConfig.topic;
+        if (!subscribedTopics.has(topic)) {
+            console.log(`Subscribing to new topic: ${topic}`);
+            mqttClient.subscribe(topic, (err) => {
+                if (!err) {
+                    subscribedTopics.add(topic);
+                    console.log(`Successfully subscribed to ${topic}`);
+                } else {
+                    console.error(`Subscription error on topic ${topic}:`, err);
+                }
+            });
+        }
+    });
+}
+
+function processMessage(topic, message) {
+    try {
+        const msg = JSON.parse(message.toString());
+        const deviceId = msg.data[0].vals[0];
+        const date = msg.data[0].vals[1].replace(/\//g, '-');
+        const time = msg.data[0].vals[2].replace(/:/g, '-');
+        const taAvg = msg.data[0].vals[6];
+        const rhAvg = msg.data[0].vals[9];
+
+        console.log(`Storing data for ${topic}: Device ID - ${deviceId}, Date - ${date}, Time - ${time}, TA_AVG - ${taAvg}, RH_AVG - ${rhAvg}`);
+        
+        const ref = admin.database().ref(`devices/${deviceId}/${date}/${time}`);
+        ref.set({
+            temp_avg: taAvg,
+            rh_avg: rhAvg
+        });
+        
+    } catch (e) {
+        console.error('Error processing message:', e);
+    }
+}
+
+exports.mqttListener = functions.pubsub.schedule('every 5 minutes').onRun(async (context) => {
     if (!mqttClient || !mqttClient.connected) {
-        console.log('MQTT client not connected or not set up, attempting to setup...');
-        setupMqttClient();
+        console.log('MQTT client not connected, setting up...');
+        await setupMqttClient();
     } else {
-        console.log('MQTT client already connected.');
+        console.log('MQTT client already connected, refreshing subscriptions...');
+        await refreshSubscriptions();
     }
 });
+
