@@ -63,8 +63,13 @@ function processMessage(topic, message) {
     try {
         const msg = JSON.parse(message.toString());
         const deviceId = msg.data[0].vals[0];
-        const date = msg.data[0].vals[1].replace(/\//g, '-');
-        const time = msg.data[0].vals[2].replace(/:/g, '-');
+        
+        // Original date format from message: dd/mm/yyyy
+        // Convert date format from dd/mm/yyyy to yyyy-mm-dd
+        let dateParts = msg.data[0].vals[1].split('/');
+        const date = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`; // reordering to yyyy-mm-dd
+
+        const time = msg.data[0].vals[2].replace(/:/g, '-'); // converting time format to avoid colon in Firebase keys
         const taAvg = msg.data[0].vals[6];
         const rhAvg = msg.data[0].vals[9];
 
@@ -80,6 +85,7 @@ function processMessage(topic, message) {
         console.error('Error processing message:', e);
     }
 }
+
 
 exports.mqttListener = functions.pubsub.schedule('every 5 minutes').onRun(async (context) => {
     if (!mqttClient || !mqttClient.connected) {
